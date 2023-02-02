@@ -1,6 +1,7 @@
 #ifndef THREADSAFE__MAP_H_
 #define THREADSAFE__MAP_H_
 
+#include <atomic>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -44,6 +45,8 @@ class Map {
   void Insert(const Key& key, Val&& value);
   bool Erase(const Key& key);
 
+  [[nodiscard]] uint64_t Size() const;
+
   // Not threadsafe.
   Map(Map&& other) noexcept;
   Map& operator=(Map&& other) noexcept;
@@ -55,6 +58,7 @@ class Map {
   static constexpr int kDefaultSize = 55001;
 
   uint64_t size_;
+  std::atomic<uint64_t> count_ = 0;
   std::vector<Bucket> data_;
   Hash hash_;
 };
@@ -132,6 +136,7 @@ void Map<Key, Value, Hash>::Insert(const Key& key, Val&& val) {
   std::unique_lock lk(bucket.m);
   if (bucket.head == nullptr) {
     bucket.head = std::move(new_node);
+    ++count_;
     return;
   }
   Node* n = bucket.head.get();
@@ -151,6 +156,7 @@ void Map<Key, Value, Hash>::Insert(const Key& key, Val&& val) {
     lk = std::move(n_lk);
   }
   n->next = std::move(new_node);
+  ++count_;
 }
 
 template <typename Key, typename Value, typename Hash>
@@ -164,6 +170,7 @@ bool Map<Key, Value, Hash>::Erase(const Key& key) {
   Node* node = bucket.head.get();
   if (node->key == key) {
     bucket.head = std::move(node->next);
+    --count_;
     return true;
   }
   Node* next = nullptr;
@@ -171,6 +178,7 @@ bool Map<Key, Value, Hash>::Erase(const Key& key) {
     std::unique_lock n_lk(next->m);
     if (next->key == key) {
       node->next = std::move(next->next);
+      --count_;
       return true;
     }
     lk.unlock();
@@ -181,8 +189,13 @@ bool Map<Key, Value, Hash>::Erase(const Key& key) {
 }
 
 template <typename Key, typename Value, typename Hash>
+uint64_t Map<Key, Value, Hash>::Size() const {
+  return count_;
+}
+
+template <typename Key, typename Value, typename Hash>
 Map<Key, Value, Hash>::Map(Map&& other) noexcept
-    : size_(other.size_), data_(std::move(other.data_)) {
+    : size_(other.size_), count_(other.count_), data_(std::move(other.data_)) {
   other.size_ = 0;
 }
 
@@ -192,6 +205,7 @@ Map<Key, Value, Hash>& Map<Key, Value, Hash>::operator=(Map&& other) noexcept {
     return *this;
   }
   size_ = other.size_;
+  count_ = other.count_;
   data_ = std::move(other.data_);
   other.size_ = 0;
   return *this;
@@ -222,6 +236,7 @@ void Map<Key, Value, Hash>::FastInsert(Key&& key, Value&& val) {
   auto h = hash_(key) % size_;
   if (data_[h].head == nullptr) {
     data_[h].head = std::make_unique<Node>(std::move(key), std::move(val));
+    ++count_;
     return;
   }
   Node* prev = data_[h].head.get();
@@ -237,6 +252,7 @@ void Map<Key, Value, Hash>::FastInsert(Key&& key, Value&& val) {
     }
   }
   prev->next = std::make_unique<Node>(std::move(key), std::move(val));
+  ++count_;
 }
 
 #endif  // THREADSAFE__MAP_H_
