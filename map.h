@@ -43,8 +43,8 @@ class Map {
 
   template <typename Val>
     requires std::is_same_v<std::remove_cvref_t<Val>, Value> or
-             std::is_convertible_v<Val, Value>
-  void Insert(const Key& key, Val&& value);
+             std::is_convertible_v<Val, Value> bool
+  Insert(const Key& key, Val&& value, bool replace = false);
   bool Erase(const Key& key);
 
   [[nodiscard]] uint64_t Size() const;
@@ -130,8 +130,8 @@ bool Map<Key, Value, Hash>::Contains(const Key& key) const {
 template <typename Key, typename Value, typename Hash>
 template <typename Val>
   requires std::is_same_v<std::remove_cvref_t<Val>, Value> or
-           std::is_convertible_v<Val, Value>
-void Map<Key, Value, Hash>::Insert(const Key& key, Val&& val) {
+           std::is_convertible_v<Val, Value> bool
+Map<Key, Value, Hash>::Insert(const Key& key, Val&& val, bool replace) {
   std::unique_ptr<Node> new_node =
       std::make_unique<Node>(key, std::forward<Val>(val));
   uint64_t h = hash_(key) % size_;
@@ -140,26 +140,33 @@ void Map<Key, Value, Hash>::Insert(const Key& key, Val&& val) {
   if (bucket.head == nullptr) {
     bucket.head = std::move(new_node);
     ++count_;
-    return;
+    return true;
   }
   Node* n = bucket.head.get();
   if (n->key == key) {
+    if (!replace) {
+      return false;
+    }
     Node::Swap(*new_node, *n);
-    return;
+    return true;
   }
   Node* next = nullptr;
   while ((next = n->next.get()) != nullptr) {
     std::unique_lock n_lk(next->m);
     lk.unlock();
     if (next->key == key) {
+      if (!replace) {
+        return false;
+      }
       Node::Swap(*new_node, *next);
-      return;
+      return true;
     }
     n = next;
     lk = std::move(n_lk);
   }
   n->next = std::move(new_node);
   ++count_;
+  return true;
 }
 
 template <typename Key, typename Value, typename Hash>
