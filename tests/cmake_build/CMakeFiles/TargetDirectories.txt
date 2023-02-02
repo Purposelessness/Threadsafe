@@ -1,0 +1,3 @@
+/home/purposelessness/cpp/messenger/threadsafe/tests/cmake_build/CMakeFiles/test_lib.dir
+/home/purposelessness/cpp/messenger/threadsafe/tests/cmake_build/CMakeFiles/edit_cache.dir
+/home/purposelessness/cpp/messenger/threadsafe/tests/cmake_build/CMakeFiles/rebuild_cache.dir
