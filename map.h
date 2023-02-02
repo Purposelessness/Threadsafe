@@ -13,7 +13,8 @@ class Map {
   struct Bucket {
     struct Node {
       template <typename Val>
-        requires std::is_same_v<Val, Value>
+        requires std::is_same_v<std::remove_cvref_t<Val>, Value> or
+                     std::is_convertible_v<Val, Value>
       Node(const Key& key, Val&& val) : key(key), val(std::forward<Val>(val)) {}
       static void Swap(Node& n1, Node& n2) { std::swap(n1.val, n2.val); }
 
@@ -41,7 +42,8 @@ class Map {
   [[nodiscard]] bool Contains(const Key& key) const;
 
   template <typename Val>
-    requires std::is_same_v<Val, Value>
+    requires std::is_same_v<std::remove_cvref_t<Val>, Value> or
+             std::is_convertible_v<Val, Value>
   void Insert(const Key& key, Val&& value);
   bool Erase(const Key& key);
 
@@ -127,7 +129,8 @@ bool Map<Key, Value, Hash>::Contains(const Key& key) const {
 
 template <typename Key, typename Value, typename Hash>
 template <typename Val>
-  requires std::is_same_v<Val, Value>
+  requires std::is_same_v<std::remove_cvref_t<Val>, Value> or
+           std::is_convertible_v<Val, Value>
 void Map<Key, Value, Hash>::Insert(const Key& key, Val&& val) {
   std::unique_ptr<Node> new_node =
       std::make_unique<Node>(key, std::forward<Val>(val));
