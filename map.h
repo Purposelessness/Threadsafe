@@ -30,6 +30,10 @@ class Map {
 
  public:
   explicit Map(uint64_t size = kDefaultSize);
+  ~Map() = default;
+
+  Map(const Map& other) = delete;
+  Map& operator=(const Map& other) = delete;
 
   std::optional<Value> operator[](const Key& key);
   std::optional<Value> Find(const Key& key);
@@ -40,16 +44,19 @@ class Map {
   void Insert(const Key& key, Val&& value);
   bool Erase(const Key& key);
 
+  // Not threadsafe.
+  Map(Map&& other) noexcept;
+  Map& operator=(Map&& other) noexcept;
+  void Resize();
+  void Resize(uint64_t new_size);
+  void FastInsert(Key&& key, Value&& value);
+
  private:
-  static constexpr float kMaxCoef = 0.7F;
   static constexpr int kDefaultSize = 55001;
 
   uint64_t size_;
   std::vector<Bucket> data_;
   Hash hash_;
-  float coef_ = 0;
-  // guards map data (size, data, coef)
-  mutable std::shared_mutex m_;
 };
 
 template <typename Key, typename Value, typename Hash>
@@ -57,7 +64,6 @@ Map<Key, Value, Hash>::Map(uint64_t size) : size_(size), data_(size_) {}
 
 template <typename Key, typename Value, typename Hash>
 std::optional<Value> Map<Key, Value, Hash>::operator[](const Key& key) {
-  std::shared_lock m_lk(m_);
   uint64_t h = hash_(key) % size_;
   auto& bucket = data_[h];
   std::shared_lock lk(bucket.m);
@@ -66,7 +72,6 @@ std::optional<Value> Map<Key, Value, Hash>::operator[](const Key& key) {
   }
 
   Node* n = bucket.head.get();
-  m_lk.unlock();
   if (n->key == key) {
     std::optional out{n->val};
     return out;
@@ -93,7 +98,6 @@ std::optional<Value> Map<Key, Value, Hash>::Find(const Key& key) {
 
 template <typename Key, typename Value, typename Hash>
 bool Map<Key, Value, Hash>::Contains(const Key& key) const {
-  std::shared_lock m_lk(m_);
   uint64_t h = hash_(key) % size_;
   auto& bucket = data_[h];
   std::shared_lock lk(bucket.m);
@@ -101,7 +105,6 @@ bool Map<Key, Value, Hash>::Contains(const Key& key) const {
     return false;
   }
   Node* n = bucket.head.get();
-  m_lk.unlock();
   if (n->key == key) {
     return true;
   }
@@ -124,7 +127,6 @@ template <typename Val>
 void Map<Key, Value, Hash>::Insert(const Key& key, Val&& val) {
   std::unique_ptr<Node> new_node =
       std::make_unique<Node>(key, std::forward<Val>(val));
-  std::shared_lock m_lk(m_);
   uint64_t h = hash_(key) % size_;
   auto& bucket = data_[h];
   std::unique_lock lk(bucket.m);
@@ -133,7 +135,6 @@ void Map<Key, Value, Hash>::Insert(const Key& key, Val&& val) {
     return;
   }
   Node* n = bucket.head.get();
-  m_lk.unlock();
   if (n->key == key) {
     Node::Swap(*new_node, *n);
     return;
@@ -154,7 +155,6 @@ void Map<Key, Value, Hash>::Insert(const Key& key, Val&& val) {
 
 template <typename Key, typename Value, typename Hash>
 bool Map<Key, Value, Hash>::Erase(const Key& key) {
-  std::shared_lock m_lk(m_);
   auto h = hash_(key) % size_;
   auto& bucket = data_[h];
   std::unique_lock lk(bucket.m);
@@ -166,7 +166,6 @@ bool Map<Key, Value, Hash>::Erase(const Key& key) {
     bucket.head = std::move(node->next);
     return true;
   }
-  m_lk.unlock();
   Node* next = nullptr;
   while ((next = node->next.get()) != nullptr) {
     std::unique_lock n_lk(next->m);
@@ -179,6 +178,65 @@ bool Map<Key, Value, Hash>::Erase(const Key& key) {
     lk = std::move(n_lk);
   }
   return false;
+}
+
+template <typename Key, typename Value, typename Hash>
+Map<Key, Value, Hash>::Map(Map&& other) noexcept
+    : size_(other.size_), data_(std::move(other.data_)) {
+  other.size_ = 0;
+}
+
+template <typename Key, typename Value, typename Hash>
+Map<Key, Value, Hash>& Map<Key, Value, Hash>::operator=(Map&& other) noexcept {
+  if (*this == other) {
+    return *this;
+  }
+  size_ = other.size_;
+  data_ = std::move(other.data_);
+  other.size_ = 0;
+  return *this;
+}
+
+template <typename Key, typename Value, typename Hash>
+void Map<Key, Value, Hash>::Resize() {
+  Resize(size_ * 2);
+}
+
+template <typename Key, typename Value, typename Hash>
+void Map<Key, Value, Hash>::Resize(uint64_t new_size) {
+  if (new_size == 0) {
+    return;
+  }
+  Map<Key, Value, Hash> new_map(new_size);
+  std::for_each(data_.begin(), data_.end(), [&new_map](auto&& bucket) {
+    for (Node* node = bucket.head.get(); node != nullptr;
+         node = node->next.get()) {
+      new_map.FastInsert(std::move(node->key), std::move(node->val));
+    }
+  });
+  *this = std::move(new_map);
+}
+
+template <typename Key, typename Value, typename Hash>
+void Map<Key, Value, Hash>::FastInsert(Key&& key, Value&& val) {
+  auto h = hash_(key) % size_;
+  if (data_[h].head == nullptr) {
+    data_[h].head = std::make_unique<Node>(std::move(key), std::move(val));
+    return;
+  }
+  Node* prev = data_[h].head.get();
+  if (prev->key == key) {
+    prev->val = std::move(val);
+    return;
+  }
+  for (Node* next = prev->next; next != nullptr;
+       prev = next, next = next->next) {
+    if (next->key == key) {
+      next->val = std::move(val);
+      return;
+    }
+  }
+  prev->next = std::make_unique<Node>(std::move(key), std::move(val));
 }
 
 #endif  // THREADSAFE__MAP_H_
