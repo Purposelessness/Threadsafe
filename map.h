@@ -47,6 +47,10 @@ class Map {
   Insert(const Key& key, Val&& value, bool replace = false);
   bool Erase(const Key& key);
 
+  // Func(val) should be threadsafe.
+  template <typename Func>
+  bool ApplySoft(const Key& key, Func&& func);
+
   [[nodiscard]] uint64_t Size() const;
 
   // Not threadsafe.
@@ -192,6 +196,34 @@ bool Map<Key, Value, Hash>::Erase(const Key& key) {
       return true;
     }
     lk.unlock();
+    node = next;
+    lk = std::move(n_lk);
+  }
+  return false;
+}
+
+template <typename Key, typename Value, typename Hash>
+template <typename Func>
+bool Map<Key, Value, Hash>::ApplySoft(const Key& key, Func&& func) {
+  auto h = hash_(key) % size_;
+  auto& bucket = data_[h];
+  std::shared_lock lk(bucket.m);
+  if (bucket.head == nullptr) {
+    return false;
+  }
+  Node* node = bucket.head.get();
+  if (node->key == key) {
+    std::forward<Func>(func)(node->val);
+    return true;
+  }
+  Node* next = nullptr;
+  while ((next = node->next.get()) != nullptr) {
+    std::shared_lock n_lk(next->m);
+    lk.unlock();
+    if (next->key == key) {
+      std::forward<Func>(func)(node->val);
+      return true;
+    }
     node = next;
     lk = std::move(n_lk);
   }
