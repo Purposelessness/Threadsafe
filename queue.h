@@ -16,6 +16,11 @@ class Queue {
  public:
   Queue() : head_(std::make_unique<Node>()), tail_(head_.get()) {}
 
+  Queue(const Queue<T>& other) = delete;
+  Queue& operator=(const Queue<T>& other) = delete;
+  Queue(Queue&& other) noexcept;
+  Queue& operator=(Queue&& other) noexcept;
+
   void Push(T value);
   T WaitAndPop();
   std::optional<T> TryPop();
@@ -73,6 +78,26 @@ template <typename T>
 typename Queue<T>::Node* Queue<T>::GetTail() {
   std::scoped_lock lock(tm_);
   return tail_;
+}
+
+template <typename T>
+Queue<T>::Queue(Queue<T>&& other) noexcept {
+  std::scoped_lock lk(other.hm_, other.tm_);
+  head_ = std::move(other.head_);
+  tail_ = other.tail_;
+  other.tail_ = nullptr;
+}
+
+template <typename T>
+Queue<T>& Queue<T>::operator=(Queue<T> &&other) noexcept {
+  if (this == &other) {
+    return *this;
+  }
+  std::scoped_lock lk(other.hm_, other.tm_);
+  head_ = std::move(other.head_);
+  tail_ = other.tail_;
+  other.tail_ = nullptr;
+  return *this;
 }
 
 #endif  // THREADSAFE__QUEUE_H_
