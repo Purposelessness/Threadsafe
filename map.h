@@ -211,7 +211,7 @@ Map<Key, Value, Hash>::Map(Map&& other) noexcept
 
 template <typename Key, typename Value, typename Hash>
 Map<Key, Value, Hash>& Map<Key, Value, Hash>::operator=(Map&& other) noexcept {
-  if (*this == other) {
+  if (this == &other) {
     return *this;
   }
   size_ = other.size_;
