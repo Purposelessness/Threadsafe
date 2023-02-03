@@ -3,6 +3,7 @@
 
 #include <condition_variable>
 #include <mutex>
+#include <optional>
 #include <queue>
 
 template <typename T>
@@ -17,6 +18,7 @@ class Queue {
 
   void Push(T value);
   T WaitAndPop();
+  std::optional<T> TryPop();
   [[nodiscard]] bool Empty() const;
 
  private:
@@ -45,6 +47,17 @@ template <typename T>
 T Queue<T>::WaitAndPop() {
   std::unique_lock lock(hm_);
   cv_.wait(lock, [this]() { return head_.get() != GetTail(); });
+  auto val = std::move(head_->value);
+  head_ = std::move(head_->next);
+  return val;
+}
+
+template <typename T>
+std::optional<T> Queue<T>::TryPop() {
+  std::scoped_lock lk(hm_);
+  if (head_.get() == GetTail()) {
+    return std::nullopt;
+  }
   auto val = std::move(head_->value);
   head_ = std::move(head_->next);
   return val;
